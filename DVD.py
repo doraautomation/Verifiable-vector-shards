@@ -2029,42 +2029,6 @@ class RecoveryExperiment:
             w.writerows(rows)
         print(f"\n[RecoveryExp] Wrote {len(rows)} rows to {out_csv}")
 
-        if self.make_plot:
-            self._plot(rows)
-        return rows
-
-    def _plot(self, rows):
-        try:
-            import matplotlib
-            matplotlib.use("Agg")
-            import matplotlib.pyplot as plt
-        except ImportError:
-            print("[RecoveryExp] matplotlib not installed -- skipping plot")
-            return
-
-        fig, ax = plt.subplots(figsize=(7, 4.8))
-        markers = {10: "o", 25: "s", 40: "^"}
-        for pct in sorted({r["recovering_pct"] for r in rows}):
-            sub = sorted([r for r in rows if r["recovering_pct"] == pct],
-                         key=lambda r: r["missing_commitments"])
-            ax.plot([r["missing_commitments"] for r in sub],
-                    [r["recovery_latency_sec"] for r in sub],
-                    marker=markers.get(pct, "o"), linewidth=1.8, markersize=6,
-                    label=f"{pct}% recovering nodes")
-
-        ax.set_xscale("log")
-        ax.set_yscale("log")
-        ax.set_xlabel("Number of missing commitments")
-        ax.set_ylabel("Recovery latency (s)")
-        ax.set_title("Node recovery latency vs. commitment backlog")
-        ax.grid(True, which="both", alpha=0.3, linewidth=0.5)
-        ax.legend(frameon=False)
-        fig.tight_layout()
-        out_png = os.path.join(self.output_dir, "recovery_latency.png")
-        fig.savefig(out_png, dpi=200)
-        plt.close(fig)
-        print(f"[RecoveryExp] Wrote {out_png}")
-
 
 # Pipeline runner
 class DistributedKMeansRunner:
