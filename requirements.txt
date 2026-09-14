@@ -1,0 +1,4 @@
+mpi4py>=3.1
+numpy>=1.20
+pandas>=1.2
+scikit-learn>=0.24
