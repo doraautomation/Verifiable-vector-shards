@@ -7,7 +7,7 @@
 Partitions high-dimensional vectors into similarity-preserving, load-balanced shards using a weighted coreset for fast convergence at scale across distributed nodes. Commitment generation is integrated directly into shard materialization, so every shard emits a compact, independently verifiable summary as it is formed.
 
 **LiteQuorum Integrity Protocol with Fault Injection**
-A three-phase quorum protocol over MPI that verifies a shard once against an independently computed context, then reaches majority agreement by exchanging only fixed-size digest tuples. Validator count and fault rate are configurable, allowing sub-cluster committee verification to be evaluated under crash failures up to the majority boundary.
+A quorum protocol over MPI: verify a shard against an independently computed context, then reach majority agreement by exchanging fixed-size digest tuples. Validator count and fault rate are configurable, so committee verification can be evaluated under crash failures up to the majority boundary.
 
 **Verification Synchronization**
 A push-pull mechanism that propagates accepted commitments to participating verifiers and lets recovering nodes identify and retrieve only the commitments they missed, so recovery cost scales with backlog depth rather than with the length of the verification history.
