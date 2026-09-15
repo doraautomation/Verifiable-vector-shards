@@ -19,7 +19,7 @@ Raw vector shards remain in the distributed data plane, while only compact shard
 Reads big-ann-benchmarks-formatted datasets through parallel memory-mapped row ranges, so each rank loads only its own slice and no single node ever holds the full corpus.
 
 ## Dataset
-DVD defaults to a slice of the [big-ann-benchmarks](https://big-ann-benchmarks.com/) text2image-1B dataset (200-dimensional float vectors), read as memory-mapped `.fbin` files so no single rank has to hold the full corpus in memory. It also accepts `.fvecs`, `.npy`, `.hdf5`/`.h5`, and `.csv` input via `--data`, so any dataset in one of those formats can be used in place of the default.
+DVD defaults to a slice of the [big-ann-benchmarks](https://big-ann-benchmarks.com/) text2image-1B dataset, read as memory-mapped `.fbin` files so no single rank has to hold the full corpus in memory. It also accepts `.fvecs`, `.npy`, `.hdf5`/`.h5`, and `.csv` input via `--data`, so any dataset in one of those formats can be used in place of the default.
  
 ```
 python create_dataset.py --dataset text2image-100M
