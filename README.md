@@ -19,50 +19,51 @@ Raw vector shards remain in the distributed data plane, while only compact shard
 Reads big-ann-benchmarks-formatted datasets through parallel memory-mapped row ranges, so each rank loads only its own slice and no single node ever holds the full corpus.
 
 ## Dataset
-
 DVD defaults to a slice of the [big-ann-benchmarks](https://big-ann-benchmarks.com/) text2image-1B dataset (200-dimensional float vectors), read as memory-mapped `.fbin` files so no single rank has to hold the full corpus in memory. It also accepts `.fvecs`, `.npy`, `.hdf5`/`.h5`, and `.csv` input via `--data`, so any dataset in one of those formats can be used in place of the default.
-
-Download a slice:
-
+ 
 ```
 python create_dataset.py --dataset text2image-100M
 ```
-
+ 
 Point `--data` at the resulting file to run against it:
-
+ 
 ```
 mpiexec -n 4 python DVD.py --data base.1B.fbin.crop_nb_100000000
 ```
-
-## Development Setup
-
-DVD runs on [Python](https://www.python.org/downloads/) and requires an MPI implementation together with [mpi4py](https://github.com/mpi4py/mpi4py/).
-
-Clone the repository:
-
+ 
+Development Setup
+DVD should be run using python. First install [python](https://www.python.org/downloads/)
+DVD is integrated with MPI Then install [mpi4py](https://github.com/mpi4py/mpi4py/)
+To clone the code to your target directory
+ 
 ```
 git clone https://github.com/doraautomation/DVD
 cd DVD
 ```
-
-Install the required packages:
-
+ 
+Install all required package.
+ 
 ```
 pip install -r requirements.txt
 ```
-
-## Run the Project Locally
-
-Once the dependencies are installed, launch the project with `mpiexec`. For example, with four processes:
-
+ 
+Run the Project Locally
+After installing the dependencies and downloading a dataset (see Dataset above), you can run the project using `mpiexec`. Here's an example with 4 processes:
+ 
 ```
-mpiexec -n 4 python DVD.py
+mpiexec -n 4 python DVD.py --data base.1B.fbin.crop_nb_100000000
 ```
-
-## Run on HPC with SLURM
-
-In an HPC environment, use the provided SLURM script to submit the job:
-
+ 
+To run on fixed vectors, set `--rows`. For example, 10M vectors:
+ 
+```
+mpiexec -n 4 python DVD.py --data base.1B.fbin.crop_nb_100000000 --rows 10M
+```
+ 
+Run on HPC with SLURM
+If you're working in an HPC environment, you can use the provided SLURM script to run your job.
+Submit the Job
+ 
 ```
 sbatch run_job.slurm
 ```
