@@ -48,16 +48,16 @@ pip install -r requirements.txt
 ```
  
 Run the Project Locally
-After installing the dependencies and downloading a dataset (see Dataset above), you can run the project using `mpiexec`. Here's an example with 4 processes:
+After installing the dependencies and downloading a dataset (see Dataset above), you can run the project using `mpiexec`. Here's an example with 5 processes:
  
 ```
-mpiexec -n 4 python DVD.py --data base.1B.fbin.crop_nb_100000000
+mpiexec -n 5 python DVD.py --data base.1B.fbin.crop_nb_100000000
 ```
  
 To run on fixed vectors, set `--rows`. For example, 10M vectors:
  
 ```
-mpiexec -n 4 python DVD.py --data base.1B.fbin.crop_nb_100000000 --rows 10M
+mpiexec -n 5 python DVD.py --data base.1B.fbin.crop_nb_100000000 --rows 10M
 ```
  
 Run on HPC with SLURM
