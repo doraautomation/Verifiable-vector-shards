@@ -1,21 +1,28 @@
-DVD
-DVD: Commitment-Aware Semantic Sharding for Large-Scale High-Dimensional Vector Data Management
 
-Features
+**Shard-Level Verifiability as a Native Vector-Database Abstraction**
 
-* Coreset-Accelerated Semantic Clustering via Parallel K-Means
-Partitions high-dimensional vectors into similarity-preserving, load-balanced shards using a weighted coreset for fast convergence at scale across distributed nodes.
-* Configurable LiteQuorum Consensus with Fault Injection
-Implements a two-phase quorum consensus protocol over MPI, with an adjustable validator count and injectable fault rate to simulate sub-cluster committee-based consensus under Byzantine conditions.
-* Hybrid On-Chain/Off-Chain Ledger Management
-Raw vector shard data resides in off-chain distributed storage, while only lightweight shard metadata blocks are committed on-chain, ensuring tamper-evident provenance without excessive storage overhead.
-* Scalable Ingestion for 100M+ Vector Datasets
-Reads big-ann-formatted datasets via parallel memory-mapped row ranges, so each rank loads only its own slice and no single node ever holds the full corpus.
-* Optional Tamper-Detection & Recovery Diagnostics
-Measures tamper-detection latency under simulated shard and chain attacks, and node-recovery latency after simulated dropout, enabled with a single flag.
+## Features
 
-Dataset
+**Verifiable Semantic Shard Construction**
+Partitions high-dimensional vectors into similarity-preserving, load-balanced shards using a weighted coreset for fast convergence at scale across distributed nodes. Commitment generation is integrated directly into shard materialization, so every shard emits a compact, independently verifiable summary as it is formed.
+
+**LiteQuorum Integrity Protocol with Fault Injection**
+A three-phase quorum protocol over MPI that verifies a shard once against an independently computed context, then reaches majority agreement by exchanging only fixed-size digest tuples. Validator count and fault rate are configurable, allowing sub-cluster committee verification to be evaluated under crash failures up to the majority boundary.
+
+**Verification Synchronization**
+A push-pull mechanism that propagates accepted commitments to participating verifiers and lets recovering nodes identify and retrieve only the commitments they missed, so recovery cost scales with backlog depth rather than with the length of the verification history.
+
+**Hybrid Data-Plane / Verification-Layer Storage**
+Raw vector shards remain in the distributed data plane, while only compact shard commitments enter the verification layer, providing tamper-evident provenance at a storage cost that scales with shard count rather than vector volume.
+
+**Scalable Ingestion for 100M+ Vector Datasets**
+Reads big-ann-benchmarks-formatted datasets through parallel memory-mapped row ranges, so each rank loads only its own slice and no single node ever holds the full corpus.
+
+## Dataset
+
 DVD defaults to a slice of the [big-ann-benchmarks](https://big-ann-benchmarks.com/) text2image-1B dataset (200-dimensional float vectors), read as memory-mapped `.fbin` files so no single rank has to hold the full corpus in memory. It also accepts `.fvecs`, `.npy`, `.hdf5`/`.h5`, and `.csv` input via `--data`, so any dataset in one of those formats can be used in place of the default.
+
+Download a slice:
 
 ```
 python create_dataset.py --dataset text2image-100M
@@ -27,32 +34,34 @@ Point `--data` at the resulting file to run against it:
 mpiexec -n 4 python DVD.py --data base.1B.fbin.crop_nb_100000000
 ```
 
-Development Setup
-DVD should be run using python. First install [python](https://www.python.org/downloads/)
-DVD is integrated with MPI Then install [mpi4py](https://github.com/mpi4py/mpi4py/)
-To clone the code to your target directory
+## Development Setup
+
+DVD runs on [Python](https://www.python.org/downloads/) and requires an MPI implementation together with [mpi4py](https://github.com/mpi4py/mpi4py/).
+
+Clone the repository:
 
 ```
 git clone https://github.com/doraautomation/DVD
 cd DVD
 ```
 
-Install all required package.
+Install the required packages:
 
 ```
 pip install -r requirements.txt
 ```
 
-Run the Project Locally
-After installing the dependencies, you can run the project using `mpiexec`. Here's an example with 4 processes:
+## Run the Project Locally
+
+Once the dependencies are installed, launch the project with `mpiexec`. For example, with four processes:
 
 ```
 mpiexec -n 4 python DVD.py
 ```
 
-Run on HPC with SLURM
-If you're working in an HPC environment, you can use the provided SLURM script to run your job.
-Submit the Job
+## Run on HPC with SLURM
+
+In an HPC environment, use the provided SLURM script to submit the job:
 
 ```
 sbatch run_job.slurm
