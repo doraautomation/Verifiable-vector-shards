@@ -656,10 +656,10 @@ def build_all_verification_ctxs(comm, rank: int, size: int,
 # Distributed Ledger
 
 class DVD:
-    def __init__(self, chain_file="DVD.json"):
-        self.chain_file = chain_file
-        self.chain = []
-        if os.path.exists(self.chain_file):
+    def __init__(self, state_file="DVD.json"):
+        self.state_file = state_file
+        self.state = []
+        if os.path.exists(self.state_file):
             self.load()
         else:
             self.create_genesis_block()
@@ -672,10 +672,10 @@ class DVD:
             "block_type": "genesis", "data": "Genesis Block"
         }
         g["block_hash"] = self.compute_block_hash(g)
-        self.chain = [g]
+        self.state = [g]
 
     def get_last_block(self):
-        return self.chain[-1]
+        return self.state[-1]
 
     def compute_block_hash(self, block):
         bc = deepcopy(block)
@@ -687,27 +687,27 @@ class DVD:
     def add_block(self, committed_block):
         last    = self.get_last_block()
         new_blk = deepcopy(committed_block)
-        new_blk["index"]         = len(self.chain)
+        new_blk["index"]         = len(self.state)
         new_blk["timestamp"]     = time.time()
         new_blk["previous_hash"] = last["block_hash"]
         new_blk["block_hash"]    = self.compute_block_hash(new_blk)
-        self.chain.append(new_blk)
+        self.state.append(new_blk)
         return new_blk
 
     def save(self):
-        with open(self.chain_file, "w", encoding="utf-8") as f:
-            json.dump(self.chain, f, indent=2)
+        with open(self.state_file, "w", encoding="utf-8") as f:
+            json.dump(self.state, f, indent=2)
 
     def load(self):
-        with open(self.chain_file, "r", encoding="utf-8") as f:
-            self.chain = json.load(f)
+        with open(self.state_file, "r", encoding="utf-8") as f:
+            self.state = json.load(f)
 
-    def verify_chain(self):
-        if not self.chain:
+    def verify_state(self):
+        if not self.state:
             return {"valid": False, "failure_index": -1,
-                    "failure_reason": "empty chain", "checked_blocks": 0}
+                    "failure_reason": "empty state", "checked_blocks": 0}
 
-        for i, blk in enumerate(self.chain):
+        for i, blk in enumerate(self.state):
             recomputed = self.compute_block_hash(blk)
             if blk.get("block_hash") != recomputed:
                 return {"valid": False, "failure_index": i,
@@ -718,13 +718,13 @@ class DVD:
                         "failure_reason": f"index mismatch (stored={blk.get('index')}, expected={i})",
                         "checked_blocks": i}
             if i > 0:
-                prev_hash = self.chain[i - 1]["block_hash"]
+                prev_hash = self.state[i - 1]["block_hash"]
                 if blk.get("previous_hash") != prev_hash:
                     return {"valid": False, "failure_index": i,
                             "failure_reason": "previous_hash broken (reordering/deletion)",
                             "checked_blocks": i}
         return {"valid": True, "failure_index": None,
-                "failure_reason": None, "checked_blocks": len(self.chain)}
+                "failure_reason": None, "checked_blocks": len(self.state)}
 
 
 BIGANN_PATH = "base.1B.fbin.crop_nb_100000000"
@@ -1310,7 +1310,7 @@ def build_metadata_block(rank, shard_id, shard_vectors, shard_file, commitment=N
         "vector_dim":        int(shard_vectors.shape[1])
                                if shard_vectors.ndim == 2 and shard_vectors.size > 0
                                else (int(centroid.shape[0]) if centroid.ndim == 1 else 0),
-        "offchain_ref":      os.path.basename(shard_file),
+        "offstate_ref":      os.path.basename(shard_file),
     }
 
 
@@ -1384,7 +1384,7 @@ class PushPullHashConsensus:
             "rank_id", "shard_id", "timestamp", "data_hash",
             "centroid", "centroid_hash",
             "merkle_root", "merkle_depth", "merkle_leaves_ref",
-            "num_points", "vector_dim", "offchain_ref"
+            "num_points", "vector_dim", "offstate_ref"
         )}
 
         expected_data_hash     = verification_ctx["data_hash"]
@@ -1608,7 +1608,7 @@ class TamperDetectionExperiment:
 
     SHARD_ATTACKS = ["A1_row_tamper", "A2_centroid_tamper",
                      "A3_data_hash_forgery", "A4_replay"]
-    CHAIN_ATTACKS = ["A5_reorder", "A6_blockhash_tamper"]
+    state_ATTACKS = ["A5_reorder", "A6_blockhash_tamper"]
 
     def __init__(self, output_dir, validator_counts=None,
                  n_trials=5, seed=42):
@@ -1617,7 +1617,7 @@ class TamperDetectionExperiment:
         self.n_trials = int(n_trials)
         self.seed = int(seed)
         self.shards_dir = os.path.join(output_dir, "shards")
-        self.chain_path = os.path.join(output_dir, "DVD.json")
+        self.state_path = os.path.join(output_dir, "DVD.json")
 
 
     def _apply_shard_attack(self, attack, blk, sv, rng):
@@ -1668,39 +1668,39 @@ class TamperDetectionExperiment:
         return detected, latency_ms, failed_check
 
 
-    def _time_chain_attack(self, attack):
-        bc = DVD(chain_file=self.chain_path)
+    def _time_state_attack(self, attack):
+        bc = DVD(state_file=self.state_path)
         bc_attacked = deepcopy(bc)
 
         if attack == "A5_reorder":
-            if len(bc_attacked.chain) >= 3:
-                bc_attacked.chain[1], bc_attacked.chain[2] = \
-                    bc_attacked.chain[2], bc_attacked.chain[1]
+            if len(bc_attacked.state) >= 3:
+                bc_attacked.state[1], bc_attacked.state[2] = \
+                    bc_attacked.state[2], bc_attacked.state[1]
         elif attack == "A6_blockhash_tamper":
-            if len(bc_attacked.chain) >= 2:
-                blk = bc_attacked.chain[1]
+            if len(bc_attacked.state) >= 2:
+                blk = bc_attacked.state[1]
                 h = blk["block_hash"]
                 blk["block_hash"] = ("0" if h[0] != "0" else "1") + h[1:]
         else:
-            raise ValueError(f"Unknown chain attack: {attack}")
+            raise ValueError(f"Unknown state attack: {attack}")
 
         t0 = time.perf_counter()
-        res = bc_attacked.verify_chain()
+        res = bc_attacked.verify_state()
         latency_ms = (time.perf_counter() - t0) * 1000
         detected = (res["valid"] is False)
         return detected, latency_ms, res.get("failure_reason")
 
 
     def run(self):
-        if not os.path.exists(self.chain_path):
-            print(f"[TamperExp] No DVD at {self.chain_path}; skipping")
+        if not os.path.exists(self.state_path):
+            print(f"[TamperExp] No DVD at {self.state_path}; skipping")
             return None
         if not os.path.isdir(self.shards_dir):
             print(f"[TamperExp] No shards dir at {self.shards_dir}; skipping")
             return None
 
-        bc = DVD(chain_file=self.chain_path)
-        committed = [b for b in bc.chain if b.get("block_type") != "genesis"
+        bc = DVD(state_file=self.state_path)
+        committed = [b for b in bc.state if b.get("block_type") != "genesis"
                                           and "shard_id" in b]
         if not committed:
             print("[TamperExp] No committed shard blocks to attack; skipping")
@@ -1760,14 +1760,14 @@ class TamperDetectionExperiment:
                       f"caught_by={row['failed_checks']}")
 
         print("\n" + "=" * 78)
-        print(f"Tamper detection -- chain-level attacks (chain length = {len(bc.chain)})")
+        print(f"Tamper detection -- state-level attacks (state length = {len(bc.state)})")
         print("=" * 78)
-        for attack in self.CHAIN_ATTACKS:
+        for attack in self.state_ATTACKS:
             detect_count = 0
             latencies = []
             reasons = set()
             for _ in range(self.n_trials):
-                detected, lat_ms, reason = self._time_chain_attack(attack)
+                detected, lat_ms, reason = self._time_state_attack(attack)
                 if detected:
                     detect_count += 1
                     if reason:
@@ -1775,10 +1775,10 @@ class TamperDetectionExperiment:
                 latencies.append(lat_ms)
 
             row = {
-                "experiment_type":  "chain_attack",
+                "experiment_type":  "state_attack",
                 "attack":           attack,
                 "n_validators":     0,
-                "n_blocks":         len(bc.chain),
+                "n_blocks":         len(bc.state),
                 "n_trials":         self.n_trials,
                 "detection_rate":   detect_count / self.n_trials,
                 "latency_ms_mean":  float(np.mean(latencies)),
@@ -1786,7 +1786,7 @@ class TamperDetectionExperiment:
                 "failed_checks":    "|".join(sorted(reasons)),
             }
             rows.append(row)
-            print(f"  [chain_len={len(bc.chain):>3}  {attack:24s}] "
+            print(f"  [state_len={len(bc.state):>3}  {attack:24s}] "
                   f"detect={row['detection_rate']*100:5.1f}%  "
                   f"latency={row['latency_ms_mean']:7.3f} +/- "
                   f"{row['latency_ms_std']:.3f} ms  "
@@ -1829,7 +1829,7 @@ class RecoveryExperiment:
         self.make_plot      = bool(make_plot)
 
         self.shards_dir  = os.path.join(output_dir, "shards")
-        self.chain_path  = os.path.join(output_dir, "DVD.json")
+        self.state_path  = os.path.join(output_dir, "DVD.json")
         self.work_dir    = os.path.join(output_dir, "recovery_work")
 
 
@@ -1852,11 +1852,11 @@ class RecoveryExperiment:
         fork_path = os.path.join(self.work_dir, "DVD_backlog.json")
         if os.path.exists(fork_path):
             os.remove(fork_path)
-        bc = DVD(chain_file=fork_path)
-        if os.path.exists(self.chain_path):
-            with open(self.chain_path, "r", encoding="utf-8") as f:
-                bc.chain = json.load(f)
-        return bc, len(bc.chain)
+        bc = DVD(state_file=fork_path)
+        if os.path.exists(self.state_path):
+            with open(self.state_path, "r", encoding="utf-8") as f:
+                bc.state = json.load(f)
+        return bc, len(bc.state)
 
     def _build_backlog_epoch(self, max_k):
         files = sorted(f for f in os.listdir(self.shards_dir) if f.endswith(".npy"))
@@ -1896,7 +1896,7 @@ class RecoveryExperiment:
 
         rows_each = int(np.mean([s.shape[0] for s in shard_vecs]))
         print(f"[RecoveryExp] Backlog built in {time.perf_counter() - t0:.1f}s "
-              f"(chain length {len(bc.chain)}, ~{rows_each} vectors/commitment)")
+              f"(state length {len(bc.state)}, ~{rows_each} vectors/commitment)")
         return bc, anchor_len, micro_vectors, rows_each
 
     def _build_backlog(self, X, max_k):
@@ -1914,11 +1914,11 @@ class RecoveryExperiment:
         fork_path = os.path.join(self.work_dir, "DVD_backlog.json")
         if os.path.exists(fork_path):
             os.remove(fork_path)
-        bc = DVD(chain_file=fork_path)
-        if os.path.exists(self.chain_path):
-            with open(self.chain_path, "r", encoding="utf-8") as f:
-                bc.chain = json.load(f)
-        anchor_len = len(bc.chain)
+        bc = DVD(state_file=fork_path)
+        if os.path.exists(self.state_path):
+            with open(self.state_path, "r", encoding="utf-8") as f:
+                bc.state = json.load(f)
+        anchor_len = len(bc.state)
 
         print(f"[RecoveryExp] Building {max_k} real commitments "
               f"({rpc} vector(s) each, dim={dim}) from {n_rows} dataset rows...")
@@ -1941,13 +1941,13 @@ class RecoveryExperiment:
                       f"({time.perf_counter() - t0:.1f}s)")
 
         print(f"[RecoveryExp] Backlog built in {time.perf_counter() - t0:.1f}s "
-              f"(chain length {len(bc.chain)})")
+              f"(state length {len(bc.state)})")
         return bc, anchor_len, micro_vectors, rpc
 
 
     def run(self):
         print("\n" + "=" * 78)
-        print("Node recovery experiment (real dataset, real chain)")
+        print("Node recovery experiment (real dataset, real state)")
         print("=" * 78)
 
         max_k = max(self.missing_counts)
@@ -1961,23 +1961,23 @@ class RecoveryExperiment:
 
         rows = []
         for k in self.missing_counts:
-            segment = bc.chain[anchor_len:anchor_len + k]
+            segment = bc.state[anchor_len:anchor_len + k]
 
-            onchain_bytes = sum(block_metadata_bytes(b) for b in segment)
+            onstate_bytes = sum(block_metadata_bytes(b) for b in segment)
             wire_bytes = len(json.dumps(segment, separators=(",", ":")).encode("utf-8"))
             per_block = wire_bytes / k
 
             recovered = DVD.__new__(DVD)
-            recovered.chain_file = os.path.join(self.work_dir, "_verify.json")
-            recovered.chain = bc.chain[:anchor_len] + segment
+            recovered.state_file = os.path.join(self.work_dir, "_verify.json")
+            recovered.state = bc.state[:anchor_len] + segment
 
             best = float("inf")
             for _ in range(3):
                 t = time.perf_counter()
-                res = recovered.verify_chain()
+                res = recovered.verify_state()
                 best = min(best, time.perf_counter() - t)
             if not res["valid"]:
-                raise RuntimeError(f"backlog failed verify_chain: {res}")
+                raise RuntimeError(f"backlog failed verify_state: {res}")
             verify_sec = best
 
             merkle_sec = 0.0
@@ -2005,13 +2005,13 @@ class RecoveryExperiment:
                     "rows_per_commit":      rpc,
                     "vector_dim":           int(dim),
                     "commit_mode":          self.commit_mode,
-                    "onchain_bytes_per_block": round(onchain_bytes / k, 1),
+                    "onstate_bytes_per_block": round(onstate_bytes / k, 1),
                     "wire_bytes_per_block": round(per_block, 1),
                     "bytes_per_node":       wire_bytes,
                     "total_bytes":          n_rec * wire_bytes,
                     "rtt_sec":              round(rtt_total, 6),
                     "transfer_sec":         round(transfer, 6),
-                    "verify_chain_sec":     round(verify_sec, 6),
+                    "verify_state_sec":     round(verify_sec, 6),
                     "verify_merkle_sec":    round(merkle_sec, 6),
                     "recovery_latency_sec": round(latency, 6),
                 })
@@ -2719,7 +2719,7 @@ class DistributedKMeansRunner:
                     "merkle_root":        block["merkle_root"],
                     "merkle_depth":       block["merkle_depth"],
                     "merkle_leaves_ref":  block["merkle_leaves_ref"],
-                    "offchain_ref":       block["offchain_ref"],
+                    "offstate_ref":       block["offstate_ref"],
                     "ctx_from_rank":      vctx.get("computed_by"),
                     "committed":          bool(cr["committed"]),
                     "push_time_sec":      cr.get("push_time_sec", cr.get("prepare_time_sec", 0.0)),
@@ -2760,7 +2760,7 @@ class DistributedKMeansRunner:
             shard_summary = sorted(shard_summary, key=lambda x: x["shard_id"])
 
             _t = MPI.Wtime()
-            bc = DVD(chain_file=os.path.join(self.output_dir, "DVD.json"))
+            bc = DVD(state_file=os.path.join(self.output_dir, "DVD.json"))
             for blk in shard_blocks:
                 bc.add_block(blk)
             bc.save()
@@ -2768,7 +2768,7 @@ class DistributedKMeansRunner:
             write_json(os.path.join(self.output_dir, "shard_summary.json"), shard_summary)
             np.save(os.path.join(self.output_dir, "centroids.npy"), centroids)
 
-            t_chain = MPI.Wtime() - _t
+            t_state = MPI.Wtime() - _t
 
             sharding_quality = dist_quality
             t_quality        = t_quality_dist
@@ -2826,10 +2826,10 @@ class DistributedKMeansRunner:
                 ("hash + Merkle (vctx)",      t_vctx_g),
                 ("shard save + block build",  t_shard_io_g),
                 ("CONSENSUS (verify+vote+commit)", t_shard_wall_g),
-                ("DVD + json write",   t_chain),
+                ("DVD + json write",   t_state),
             ]
             _acc = t_load + t_scatter + kmeans_time + t_redistribute + \
-                   t_vctx_g + t_shard_io_g + t_shard_wall_g + t_chain
+                   t_vctx_g + t_shard_io_g + t_shard_wall_g + t_state
             for _n, _v in _rows:
                 _pct = 100.0 * _v / max(_pipeline, 1e-9)
                 _ind = _n.startswith("    ")
@@ -2868,8 +2868,8 @@ class DistributedKMeansRunner:
                     f"total={r.get('total_shard_time_sec',0.0)*1000:.4f}ms"
                 )
 
-            print("\nPer-block on-chain metadata bytes:")
-            for i, blk in enumerate(bc.chain[1:], start=1):
+            print("\nPer-block on-state metadata bytes:")
+            for i, blk in enumerate(bc.state[1:], start=1):
                 print(f"  Block {i}: {block_metadata_bytes(blk)} bytes")
 
             if sharding_quality is not None:
