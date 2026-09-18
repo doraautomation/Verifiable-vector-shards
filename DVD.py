@@ -58,8 +58,8 @@ def write_json(path, obj):
         json.dump(obj, f, indent=2)
 
 
-def block_metadata_bytes(block):
-    return int(len(json.dumps(block, sort_keys=True, separators=(",", ":")).encode("utf-8")))
+def shard_metadata_bytes(shard):
+    return int(len(json.dumps(shard, sort_keys=True, separators=(",", ":")).encode("utf-8")))
 
 
 # Dataset readers
@@ -253,10 +253,10 @@ def _hash_leaf(row_index: int, row: np.ndarray) -> str:
     return hasher.hexdigest()
 
 
-def _hash_block(block_index: int, block_bytes) -> str:
+def _hash_shard(shard_index: int, shard_bytes) -> str:
     hasher = hashlib.sha256()
-    hasher.update(block_index.to_bytes(8, "little"))
-    hasher.update(block_bytes)
+    hasher.update(shard_index.to_bytes(8, "little"))
+    hasher.update(shard_bytes)
     return hasher.hexdigest()
 
 
@@ -272,7 +272,7 @@ def _hash_leaf_range(mv, row_bytes, start, end):
     idx = start // MERKLE_LEAF_ROWS
     for s in range(start, end, MERKLE_LEAF_ROWS):
         e = min(s + MERKLE_LEAF_ROWS, end)
-        out.append(_hash_block(idx, mv[s * row_bytes:e * row_bytes]))
+        out.append(_hash_shard(idx, mv[s * row_bytes:e * row_bytes]))
         idx += 1
     return out
 
@@ -360,10 +360,10 @@ def build_shard_commitment(shard_vectors: np.ndarray) -> dict:
     }
 
 
-def merkle_proof_path(leaves: list, block_index: int) -> list:
+def merkle_proof_path(leaves: list, shard_index: int) -> list:
     level = leaves[:]
     path  = []
-    idx   = block_index
+    idx   = shard_index
 
     while len(level) > 1:
         if len(level) % 2 == 1:
@@ -378,16 +378,16 @@ def merkle_proof_path(leaves: list, block_index: int) -> list:
     return path
 
 
-def verify_merkle_proof(block_index: int, rows_block: np.ndarray,
+def verify_merkle_proof(shard_index: int, rows_shard: np.ndarray,
                         proof_path: list, expected_root: str) -> bool:
-    buf = as_canonical_vectors(rows_block)
-    current = _hash_block(block_index, memoryview(buf).cast("B"))
+    buf = as_canonical_vectors(rows_shard)
+    current = _hash_shard(shard_index, memoryview(buf).cast("B"))
     for sibling, position in proof_path:
         current = _hash_pair(current, sibling) if position == "right" else _hash_pair(sibling, current)
     return current == expected_root
 
 
-def merkle_block_of(row_index: int):
+def merkle_shard_of(row_index: int):
     b = row_index // MERKLE_LEAF_ROWS
     return b, slice(b * MERKLE_LEAF_ROWS, (b + 1) * MERKLE_LEAF_ROWS)
 
@@ -441,13 +441,13 @@ class VectorVerificationError(Exception):
     pass
 
 
-def verify_timestamp(block: dict, max_drift_sec: float = 60.0) -> dict:
+def verify_timestamp(shard: dict, max_drift_sec: float = 60.0) -> dict:
     result = {"check": "verify_timestamp", "passed": False, "detail": ""}
 
-    if "timestamp" not in block:
+    if "timestamp" not in shard:
         raise VectorVerificationError("verify_timestamp: missing 'timestamp' field")
 
-    ts = block["timestamp"]
+    ts = shard["timestamp"]
     if not isinstance(ts, (int, float)):
         raise VectorVerificationError(
             f"verify_timestamp: timestamp must be numeric, got {type(ts).__name__}"
@@ -456,11 +456,11 @@ def verify_timestamp(block: dict, max_drift_sec: float = 60.0) -> dict:
     age = time.time() - ts
     if age > max_drift_sec:
         raise VectorVerificationError(
-            f"verify_timestamp: block is {age:.1f}s old (max {max_drift_sec}s) -- replay attack"
+            f"verify_timestamp: shard is {age:.1f}s old (max {max_drift_sec}s) -- replay attack"
         )
     if age < -max_drift_sec:
         raise VectorVerificationError(
-            f"verify_timestamp: block is {-age:.1f}s in the future -- pre-mining"
+            f"verify_timestamp: shard is {-age:.1f}s in the future -- pre-mining"
         )
 
     result["passed"] = True
@@ -483,10 +483,10 @@ def verify_dimensions(shard_vectors: np.ndarray, expected_dim: int) -> dict:
         )
     FINITE_CHUNK = 8192
     for s in range(0, n, FINITE_CHUNK):
-        block = shard_vectors[s:s + FINITE_CHUNK]
-        if not np.isfinite(block).all():
-            nan_c = int(np.sum(np.isnan(block)))
-            inf_c = int(np.sum(np.isinf(block)))
+        shard = shard_vectors[s:s + FINITE_CHUNK]
+        if not np.isfinite(shard).all():
+            nan_c = int(np.sum(np.isnan(shard)))
+            inf_c = int(np.sum(np.isinf(shard)))
             raise VectorVerificationError(
                 f"verify_dimensions: {nan_c} NaN + {inf_c} Inf values in rows "
                 f"[{s}, {min(s + FINITE_CHUNK, n)}) -- corrupted"
@@ -502,8 +502,8 @@ def verify_hash(
     centroid: np.ndarray,
     expected_data_hash: str,
     expected_centroid_hash: str,
-    block_data_hash: str = None,
-    block_centroid_hash: str = None,
+    shard_data_hash: str = None,
+    shard_centroid_hash: str = None,
     precomputed_data_hash: str = None,
     precomputed_centroid_hash: str = None,
 ) -> dict:
@@ -524,15 +524,15 @@ def verify_hash(
             f"verify_hash: centroid_hash mismatch -- "
             f"expected {expected_centroid_hash[:12]}... got {recomputed_cent[:12]}..."
         )
-    if block_data_hash is not None and block_data_hash != expected_data_hash:
+    if shard_data_hash is not None and shard_data_hash != expected_data_hash:
         raise VectorVerificationError(
-            f"verify_hash: block-field data_hash forged "
-            f"(block={block_data_hash[:12]}... vs validator={expected_data_hash[:12]}...)"
+            f"verify_hash: shard-field data_hash forged "
+            f"(shard={shard_data_hash[:12]}... vs validator={expected_data_hash[:12]}...)"
         )
-    if block_centroid_hash is not None and block_centroid_hash != expected_centroid_hash:
+    if shard_centroid_hash is not None and shard_centroid_hash != expected_centroid_hash:
         raise VectorVerificationError(
-            f"verify_hash: block-field centroid_hash forged "
-            f"(block={block_centroid_hash[:12]}... vs validator={expected_centroid_hash[:12]}...)"
+            f"verify_hash: shard-field centroid_hash forged "
+            f"(shard={shard_centroid_hash[:12]}... vs validator={expected_centroid_hash[:12]}...)"
         )
 
     result["passed"]        = True
@@ -543,7 +543,7 @@ def verify_hash(
 
 
 def run_minimum_verification(
-    block: dict,
+    shard: dict,
     shard_vectors: np.ndarray,
     expected_data_hash: str,
     expected_centroid_hash: str,
@@ -552,14 +552,14 @@ def run_minimum_verification(
     precomputed: dict = None,
 ) -> dict:
     precomputed  = precomputed or {}
-    centroid     = np.asarray(block["centroid"], dtype=CANONICAL_CENTROID_DTYPE)
-    expected_dim = int(block["vector_dim"])
-    shard_id     = int(block["shard_id"])
-    merkle_root  = block.get("merkle_root", "0" * 64)
+    centroid     = np.asarray(shard["centroid"], dtype=CANONICAL_CENTROID_DTYPE)
+    expected_dim = int(shard["vector_dim"])
+    shard_id     = int(shard["shard_id"])
+    merkle_root  = shard.get("merkle_root", "0" * 64)
 
     checks = [
         ("verify_timestamp",
-         lambda: verify_timestamp(block, max_drift_sec)),
+         lambda: verify_timestamp(shard, max_drift_sec)),
 
         ("verify_dimensions",
          lambda: verify_dimensions(shard_vectors, expected_dim)),
@@ -572,8 +572,8 @@ def run_minimum_verification(
         ("verify_hash",
          lambda: verify_hash(shard_vectors, centroid,
                              expected_data_hash, expected_centroid_hash,
-                             block_data_hash=block.get("data_hash"),
-                             block_centroid_hash=block.get("centroid_hash"),
+                             shard_data_hash=shard.get("data_hash"),
+                             shard_centroid_hash=shard.get("centroid_hash"),
                              precomputed_data_hash=precomputed.get("data_hash"),
                              precomputed_centroid_hash=precomputed.get("centroid_hash"))),
     ]
@@ -662,35 +662,35 @@ class DVD:
         if os.path.exists(self.state_file):
             self.load()
         else:
-            self.create_genesis_block()
+            self.create_genesis_shard()
             self.save()
 
-    def create_genesis_block(self):
+    def create_genesis_shard(self):
         g = {
             "index": 0, "timestamp": time.time(),
             "previous_hash": "0" * 64,
-            "block_type": "genesis", "data": "Genesis Block"
+            "shard_type": "genesis", "data": "Genesis shard"
         }
-        g["block_hash"] = self.compute_block_hash(g)
+        g["shard_hash"] = self.compute_shard_hash(g)
         self.state = [g]
 
-    def get_last_block(self):
+    def get_last_shard(self):
         return self.state[-1]
 
-    def compute_block_hash(self, block):
-        bc = deepcopy(block)
-        bc.pop("block_hash", None)
+    def compute_shard_hash(self, shard):
+        bc = deepcopy(shard)
+        bc.pop("shard_hash", None)
         return hashlib.sha256(
             json.dumps(bc, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
 
-    def add_block(self, committed_block):
-        last    = self.get_last_block()
-        new_blk = deepcopy(committed_block)
+    def add_shard(self, committed_shard):
+        last    = self.get_last_shard()
+        new_blk = deepcopy(committed_shard)
         new_blk["index"]         = len(self.state)
         new_blk["timestamp"]     = time.time()
-        new_blk["previous_hash"] = last["block_hash"]
-        new_blk["block_hash"]    = self.compute_block_hash(new_blk)
+        new_blk["previous_hash"] = last["shard_hash"]
+        new_blk["shard_hash"]    = self.compute_shard_hash(new_blk)
         self.state.append(new_blk)
         return new_blk
 
@@ -705,26 +705,26 @@ class DVD:
     def verify_state(self):
         if not self.state:
             return {"valid": False, "failure_index": -1,
-                    "failure_reason": "empty state", "checked_blocks": 0}
+                    "failure_reason": "empty state", "checked_shards": 0}
 
         for i, blk in enumerate(self.state):
-            recomputed = self.compute_block_hash(blk)
-            if blk.get("block_hash") != recomputed:
+            recomputed = self.compute_shard_hash(blk)
+            if blk.get("shard_hash") != recomputed:
                 return {"valid": False, "failure_index": i,
-                        "failure_reason": "block_hash mismatch (content tampered)",
-                        "checked_blocks": i}
+                        "failure_reason": "shard_hash mismatch (content tampered)",
+                        "checked_shards": i}
             if blk.get("index") != i:
                 return {"valid": False, "failure_index": i,
                         "failure_reason": f"index mismatch (stored={blk.get('index')}, expected={i})",
-                        "checked_blocks": i}
+                        "checked_shards": i}
             if i > 0:
-                prev_hash = self.state[i - 1]["block_hash"]
+                prev_hash = self.state[i - 1]["shard_hash"]
                 if blk.get("previous_hash") != prev_hash:
                     return {"valid": False, "failure_index": i,
                             "failure_reason": "previous_hash broken (reordering/deletion)",
-                            "checked_blocks": i}
+                            "checked_shards": i}
         return {"valid": True, "failure_index": None,
-                "failure_reason": None, "checked_blocks": len(self.state)}
+                "failure_reason": None, "checked_shards": len(self.state)}
 
 
 BIGANN_PATH = "base.1B.fbin.crop_nb_100000000"
@@ -1281,8 +1281,8 @@ def balanced_assign(X, C, comm, target_cv=BALANCE_TARGET_CV,
     return labels
 
 
-# Commitment block
-def build_metadata_block(rank, shard_id, shard_vectors, shard_file, commitment=None):
+# Commitment shard
+def build_metadata_shard(rank, shard_id, shard_vectors, shard_file, commitment=None):
     c             = commitment if commitment is not None \
                     else build_shard_commitment(shard_vectors)
     shard_vectors = c["vectors"]
@@ -1376,11 +1376,11 @@ class PushPullHashConsensus:
             r["failed_check"] = failed_check
         return r
 
-    def consensus(self, block, verification_ctx, rank, fault_percentage,
+    def consensus(self, shard, verification_ctx, rank, fault_percentage,
                   shard_vectors, sub_cluster_size=10, precomputed=None):
         t_enter = time.perf_counter()
 
-        parsed_data = {k: block[k] for k in (
+        parsed_data = {k: shard[k] for k in (
             "rank_id", "shard_id", "timestamp", "data_hash",
             "centroid", "centroid_hash",
             "merkle_root", "merkle_depth", "merkle_leaves_ref",
@@ -1393,9 +1393,9 @@ class PushPullHashConsensus:
 
         t_verify = time.perf_counter()
 
-        if block["merkle_root"] != expected_merkle_root:
-            print(f"[Shard {block['shard_id']}] REJECTED: merkle_root mismatch "
-                  f"(proposer {block['merkle_root'][:12]}... vs "
+        if shard["merkle_root"] != expected_merkle_root:
+            print(f"[Shard {shard['shard_id']}] REJECTED: merkle_root mismatch "
+                  f"(proposer {shard['merkle_root'][:12]}... vs "
                   f"validator {expected_merkle_root[:12]}...)")
             return self._rejected_result(
                 t_enter, sub_cluster_size, "MERKLE_ROOT_MISMATCH",
@@ -1405,7 +1405,7 @@ class PushPullHashConsensus:
         shard_vectors_np = as_canonical_vectors(shard_vectors)
 
         mv_res = run_minimum_verification(
-            block                  = block,
+            shard                  = shard,
             shard_vectors          = shard_vectors_np,
             expected_data_hash     = expected_data_hash,
             expected_centroid_hash = expected_centroid_hash,
@@ -1415,7 +1415,7 @@ class PushPullHashConsensus:
         )
         verify_dur = time.perf_counter() - t_verify
 
-        print(f"[Shard {block['shard_id']}] Verification "
+        print(f"[Shard {shard['shard_id']}] Verification "
               f"{'PASSED' if mv_res['passed'] else 'FAILED'} "
               f"in {verify_dur * 1000:.3f} ms  "
               f"(ctx from rank {verification_ctx.get('computed_by', '?')})")
@@ -1515,13 +1515,13 @@ class PushPullHashConsensus:
         committed = False
 
         if int(votes.sum()) >= commit_threshold:
-            print(f"[Shard {block['shard_id']}] Quorum reached ({state['yes']}/{sub_cluster_size})")
+            print(f"[Shard {shard['shard_id']}] Quorum reached ({state['yes']}/{sub_cluster_size})")
             cc = parsed_data.copy()
             cc["meta"] = {"coordinator_rank": rank, "status": "COORDINATOR_COMMITTED"}
             shared_ledger.append(cc)
             committed = True
         else:
-            print(f"[Shard {block['shard_id']}] Quorum failed ({state['yes']}/{sub_cluster_size})")
+            print(f"[Shard {shard['shard_id']}] Quorum failed ({state['yes']}/{sub_cluster_size})")
 
         pull_start = time.perf_counter()
         if committed:
@@ -1539,17 +1539,17 @@ class PushPullHashConsensus:
 
         consensus_dur = time.perf_counter() - t_consensus
 
-        print(f"[Shard {block['shard_id']}] Push time: {push_dur * 1000:.4f} ms")
-        print(f"[Shard {block['shard_id']}] Pull time: {pull_dur * 1000:.4f} ms")
-        print(f"[Shard {block['shard_id']}] Push-Pull time: {push_pull_dur * 1000:.4f} ms")
-        print(f"[Shard {block['shard_id']}] Consensus (control plane): "
+        print(f"[Shard {shard['shard_id']}] Push time: {push_dur * 1000:.4f} ms")
+        print(f"[Shard {shard['shard_id']}] Pull time: {pull_dur * 1000:.4f} ms")
+        print(f"[Shard {shard['shard_id']}] Push-Pull time: {push_pull_dur * 1000:.4f} ms")
+        print(f"[Shard {shard['shard_id']}] Consensus (control plane): "
               f"{consensus_dur * 1000:.4f} ms  |  "
               f"Verification (data plane, O(n)): {verify_dur * 1000:.4f} ms")
 
         if self.write_trace:
             write_json(
                 os.path.join(self.output_dir,
-                             f"consensus_trace_rank_{rank}_shard_{block['shard_id']}.json"),
+                             f"consensus_trace_rank_{rank}_shard_{shard['shard_id']}.json"),
                 {
                     "min_verification":      mv_res,
                     "verification_ctx_from": verification_ctx.get("computed_by"),
@@ -1596,9 +1596,9 @@ class PushPullHashConsensus:
             "consensus_success_rate":  float(c_rate),
         }
 
-    def run(self, block, verification_ctx, rank, fault_percentage,
+    def run(self, shard, verification_ctx, rank, fault_percentage,
             shard_vectors, sub_cluster_size=10, precomputed=None):
-        return self.consensus(block, verification_ctx, rank,
+        return self.consensus(shard, verification_ctx, rank,
                               fault_percentage, shard_vectors, sub_cluster_size,
                               precomputed=precomputed)
 
@@ -1608,7 +1608,7 @@ class TamperDetectionExperiment:
 
     SHARD_ATTACKS = ["A1_row_tamper", "A2_centroid_tamper",
                      "A3_data_hash_forgery", "A4_replay"]
-    state_ATTACKS = ["A5_reorder", "A6_blockhash_tamper"]
+    state_ATTACKS = ["A5_reorder", "A6_shardhash_tamper"]
 
     def __init__(self, output_dir, validator_counts=None,
                  n_trials=5, seed=42):
@@ -1653,7 +1653,7 @@ class TamperDetectionExperiment:
         failed_check = None
         try:
             mv = run_minimum_verification(
-                block                  = blk_attacked,
+                shard                  = blk_attacked,
                 shard_vectors          = sv_attacked,
                 expected_data_hash     = expected_data_hash,
                 expected_centroid_hash = expected_centroid_hash,
@@ -1676,11 +1676,11 @@ class TamperDetectionExperiment:
             if len(bc_attacked.state) >= 3:
                 bc_attacked.state[1], bc_attacked.state[2] = \
                     bc_attacked.state[2], bc_attacked.state[1]
-        elif attack == "A6_blockhash_tamper":
+        elif attack == "A6_shardhash_tamper":
             if len(bc_attacked.state) >= 2:
                 blk = bc_attacked.state[1]
-                h = blk["block_hash"]
-                blk["block_hash"] = ("0" if h[0] != "0" else "1") + h[1:]
+                h = blk["shard_hash"]
+                blk["shard_hash"] = ("0" if h[0] != "0" else "1") + h[1:]
         else:
             raise ValueError(f"Unknown state attack: {attack}")
 
@@ -1700,10 +1700,10 @@ class TamperDetectionExperiment:
             return None
 
         bc = DVD(state_file=self.state_path)
-        committed = [b for b in bc.state if b.get("block_type") != "genesis"
+        committed = [b for b in bc.state if b.get("shard_type") != "genesis"
                                           and "shard_id" in b]
         if not committed:
-            print("[TamperExp] No committed shard blocks to attack; skipping")
+            print("[TamperExp] No committed shard shards to attack; skipping")
             return None
 
         shards_by_id = {}
@@ -1723,7 +1723,7 @@ class TamperDetectionExperiment:
         print("\n" + "=" * 78)
         print("Tamper detection -- shard-level attacks (sweep validator count)")
         print("=" * 78)
-        target_blocks = list(shards_by_id.items())
+        target_shards = list(shards_by_id.items())
 
         for n_val in self.validator_counts:
             for attack in self.SHARD_ATTACKS:
@@ -1731,7 +1731,7 @@ class TamperDetectionExperiment:
                 latencies = []
                 checks = set()
                 for trial in range(self.n_trials):
-                    sid, sv = target_blocks[trial % len(target_blocks)]
+                    sid, sv = target_shards[trial % len(target_shards)]
                     blk = next(b for b in committed if int(b["shard_id"]) == sid)
                     detected, lat_ms, failed = self._time_shard_attack(
                         attack, blk, sv, rng)
@@ -1745,7 +1745,7 @@ class TamperDetectionExperiment:
                     "experiment_type":  "shard_attack",
                     "attack":           attack,
                     "n_validators":     n_val,
-                    "n_blocks":         len(committed),
+                    "n_shards":         len(committed),
                     "n_trials":         self.n_trials,
                     "detection_rate":   detect_count / self.n_trials,
                     "latency_ms_mean":  float(np.mean(latencies)),
@@ -1778,7 +1778,7 @@ class TamperDetectionExperiment:
                 "experiment_type":  "state_attack",
                 "attack":           attack,
                 "n_validators":     0,
-                "n_blocks":         len(bc.state),
+                "n_shards":         len(bc.state),
                 "n_trials":         self.n_trials,
                 "detection_rate":   detect_count / self.n_trials,
                 "latency_ms_mean":  float(np.mean(latencies)),
@@ -1793,7 +1793,7 @@ class TamperDetectionExperiment:
                   f"caught_by={row['failed_checks']}")
 
         out_csv = os.path.join(self.output_dir, "tamper_detection.csv")
-        fieldnames = ["experiment_type", "attack", "n_validators", "n_blocks",
+        fieldnames = ["experiment_type", "attack", "n_validators", "n_shards",
                       "n_trials", "detection_rate", "latency_ms_mean",
                       "latency_ms_std", "failed_checks"]
         import csv as _csv
@@ -1811,7 +1811,7 @@ class RecoveryExperiment:
     def __init__(self, output_dir, subcluster_size=30,
                  missing_counts=None, recovering_fractions=None,
                  rows_per_commit=None, uplink_mbps=100.0, rtt_sec=0.002,
-                 batch_blocks=128, verify_merkle=False, seed=42,
+                 batch_shards=128, verify_merkle=False, seed=42,
                  make_plot=True, commit_mode="epoch"):
         self.output_dir     = output_dir
         self.n_nodes        = int(subcluster_size)
@@ -1820,7 +1820,7 @@ class RecoveryExperiment:
         self.rows_per_commit = rows_per_commit
         self.uplink_bps     = float(uplink_mbps) * 1e6 / 8.0
         self.rtt_sec        = float(rtt_sec)
-        self.batch_blocks   = int(batch_blocks)
+        self.batch_shards   = int(batch_shards)
         self.verify_merkle  = bool(verify_merkle)
         if commit_mode not in ("epoch", "microbatch"):
             raise ValueError("commit_mode must be 'epoch' or 'microbatch'")
@@ -1867,7 +1867,7 @@ class RecoveryExperiment:
             if sv.ndim != 2 or sv.shape[0] == 0:
                 continue
             shard_file = os.path.join(self.shards_dir, fn)
-            templates.append(build_metadata_block(0, sid, sv, shard_file))
+            templates.append(build_metadata_shard(0, sid, sv, shard_file))
             shard_ids.append(sid)
             shard_vecs.append(sv)
 
@@ -1887,10 +1887,10 @@ class RecoveryExperiment:
             j = i % n_sh
             blk = dict(templates[j])
             blk["epoch"] = i // n_sh
-            bc.add_block(blk)
+            bc.add_shard(blk)
             micro_vectors.append(shard_vecs[j])
             if (i + 1) % _tick == 0 or (i + 1) == max_k:
-                print(f"[RecoveryExp]   backlog {i + 1:,}/{max_k:,} blocks "
+                print(f"[RecoveryExp]   backlog {i + 1:,}/{max_k:,} shards "
                       f"({100.0 * (i + 1) / max_k:.0f}%) "
                       f"{time.perf_counter() - t0:.1f}s", flush=True)
 
@@ -1905,7 +1905,7 @@ class RecoveryExperiment:
         if n_rows < max_k:
             print(f"[RecoveryExp] WARNING: corpus has {n_rows} rows but "
                   f"{max_k} commitments were requested, so vectors are reused "
-                  f"across commitments. Block count and block bytes -- the "
+                  f"across commitments. shard count and shard bytes -- the "
                   f"only quantities recovery latency depends on -- are "
                   f"unaffected, but do not describe these as {max_k} distinct "
                   f"vectors. commit_mode='epoch' avoids the issue entirely.")
@@ -1931,9 +1931,9 @@ class RecoveryExperiment:
             sv = X[idx, :]
 
             shard_file = os.path.join(self.work_dir, f"micro_{i % 16}.npy")
-            blk = build_metadata_block(rank=0, shard_id=i % 16,
+            blk = build_metadata_shard(rank=0, shard_id=i % 16,
                                        shard_vectors=sv, shard_file=shard_file)
-            bc.add_block(blk)
+            bc.add_shard(blk)
             micro_vectors.append(sv)
 
             if (i + 1) % 2000 == 0:
@@ -1963,9 +1963,9 @@ class RecoveryExperiment:
         for k in self.missing_counts:
             segment = bc.state[anchor_len:anchor_len + k]
 
-            onstate_bytes = sum(block_metadata_bytes(b) for b in segment)
+            onstate_bytes = sum(shard_metadata_bytes(b) for b in segment)
             wire_bytes = len(json.dumps(segment, separators=(",", ":")).encode("utf-8"))
-            per_block = wire_bytes / k
+            per_shard = wire_bytes / k
 
             recovered = DVD.__new__(DVD)
             recovered.state_file = os.path.join(self.work_dir, "_verify.json")
@@ -1992,7 +1992,7 @@ class RecoveryExperiment:
                 n_rec = max(1, int(round(self.n_nodes * frac)))
                 n_on  = max(1, self.n_nodes - n_rec)
 
-                n_batches   = math.ceil(k / self.batch_blocks)
+                n_batches   = math.ceil(k / self.batch_shards)
                 rtt_total   = n_batches * self.rtt_sec
                 transfer    = (n_rec * wire_bytes) / (n_on * self.uplink_bps)
                 latency     = rtt_total + transfer + verify_total
@@ -2005,8 +2005,8 @@ class RecoveryExperiment:
                     "rows_per_commit":      rpc,
                     "vector_dim":           int(dim),
                     "commit_mode":          self.commit_mode,
-                    "onstate_bytes_per_block": round(onstate_bytes / k, 1),
-                    "wire_bytes_per_block": round(per_block, 1),
+                    "onstate_bytes_per_shard": round(onstate_bytes / k, 1),
+                    "wire_bytes_per_shard": round(per_shard, 1),
                     "bytes_per_node":       wire_bytes,
                     "total_bytes":          n_rec * wire_bytes,
                     "rtt_sec":              round(rtt_total, 6),
@@ -2053,7 +2053,7 @@ class DistributedKMeansRunner:
         recovery_rows_per_commit=None,
         recovery_uplink_mbps=100.0,
         recovery_rtt_sec=0.002,
-        recovery_batch_blocks=128,
+        recovery_batch_shards=128,
         recovery_verify_merkle=False,
         recovery_commit_mode="epoch",
     ):
@@ -2081,7 +2081,7 @@ class DistributedKMeansRunner:
         self.recovery_rows_per_commit = recovery_rows_per_commit
         self.recovery_uplink_mbps     = float(recovery_uplink_mbps)
         self.recovery_rtt_sec         = float(recovery_rtt_sec)
-        self.recovery_batch_blocks    = int(recovery_batch_blocks)
+        self.recovery_batch_shards    = int(recovery_batch_shards)
         self.recovery_verify_merkle   = bool(recovery_verify_merkle)
         self.recovery_commit_mode     = recovery_commit_mode
         self.kmeans_verbose   = bool(kmeans_verbose)
@@ -2657,20 +2657,20 @@ class DistributedKMeansRunner:
             np.save(shard_file, sv)
             print(f"[Rank {rank}] Shard {shard_id}: {len(sv)} points saved")
 
-            block = build_metadata_block(rank, shard_id, sv, shard_file,
+            shard = build_metadata_shard(rank, shard_id, sv, shard_file,
                                          commitment=commitments.get(shard_id))
             t_shard_io += MPI.Wtime() - _t
             vctx  = all_vctxs.get(shard_id, {
                 "shard_id":      shard_id,
                 "computed_by":   rank,
-                "data_hash":     block["data_hash"],
-                "centroid_hash": block["centroid_hash"],
-                "merkle_root":   block["merkle_root"],
+                "data_hash":     shard["data_hash"],
+                "centroid_hash": shard["centroid_hash"],
+                "merkle_root":   shard["merkle_root"],
             })
 
             _t = MPI.Wtime()
             cr = engine.run(
-                block, vctx,
+                shard, vctx,
                 rank             = rank,
                 fault_percentage = self.fault_percentage,
                 shard_vectors    = sv,
@@ -2684,7 +2684,7 @@ class DistributedKMeansRunner:
             cb = None
             if cr["committed"]:
                 cb = {
-                    **block,
+                    **shard,
                     "verification_ctx_from": vctx.get("computed_by"),
                     "prepare_yes":             cr["prepare_yes"],
                     "commit_yes":              cr["commit_yes"],
@@ -2704,22 +2704,22 @@ class DistributedKMeansRunner:
 
             local_results.append({
                 "shard_id":             shard_id,
-                "committed_block":      cb,
+                "committed_shard":      cb,
                 "consensus_result":     cr,
                 "consensus_time_local":    cr["consensus_time_sec"],
                 "verification_time_local": cr["verification_time_sec"],
                 "total_time_local":        cr["total_shard_time_sec"],
                 "shard_summary_item": {
                     "shard_id":           shard_id,
-                    "num_points":         block["num_points"],
-                    "vector_dim":         block["vector_dim"],
-                    "timestamp":          block["timestamp"],
-                    "data_hash":          block["data_hash"],
-                    "centroid_hash":      block["centroid_hash"],
-                    "merkle_root":        block["merkle_root"],
-                    "merkle_depth":       block["merkle_depth"],
-                    "merkle_leaves_ref":  block["merkle_leaves_ref"],
-                    "offstate_ref":       block["offstate_ref"],
+                    "num_points":         shard["num_points"],
+                    "vector_dim":         shard["vector_dim"],
+                    "timestamp":          shard["timestamp"],
+                    "data_hash":          shard["data_hash"],
+                    "centroid_hash":      shard["centroid_hash"],
+                    "merkle_root":        shard["merkle_root"],
+                    "merkle_depth":       shard["merkle_depth"],
+                    "merkle_leaves_ref":  shard["merkle_leaves_ref"],
+                    "offstate_ref":       shard["offstate_ref"],
                     "ctx_from_rank":      vctx.get("computed_by"),
                     "committed":          bool(cr["committed"]),
                     "push_time_sec":      cr.get("push_time_sec", cr.get("prepare_time_sec", 0.0)),
@@ -2743,7 +2743,7 @@ class DistributedKMeansRunner:
         all_nested = comm.gather(local_results, root=0)
 
         if rank == 0:
-            shard_blocks, shard_crs, shard_cts, shard_summary = [], [], [], []
+            shard_shards, shard_crs, shard_cts, shard_summary = [], [], [], []
             shard_vts, shard_tts = [], []
 
             for rr in all_nested:
@@ -2753,16 +2753,16 @@ class DistributedKMeansRunner:
                     shard_vts.append(res["verification_time_local"])
                     shard_tts.append(res["total_time_local"])
                     shard_summary.append(res["shard_summary_item"])
-                    if res["committed_block"]:
-                        shard_blocks.append(res["committed_block"])
+                    if res["committed_shard"]:
+                        shard_shards.append(res["committed_shard"])
 
-            shard_blocks  = sorted(shard_blocks,  key=lambda x: x["shard_id"])
+            shard_shards  = sorted(shard_shards,  key=lambda x: x["shard_id"])
             shard_summary = sorted(shard_summary, key=lambda x: x["shard_id"])
 
             _t = MPI.Wtime()
             bc = DVD(state_file=os.path.join(self.output_dir, "DVD.json"))
-            for blk in shard_blocks:
-                bc.add_block(blk)
+            for blk in shard_shards:
+                bc.add_shard(blk)
             bc.save()
 
             write_json(os.path.join(self.output_dir, "shard_summary.json"), shard_summary)
@@ -2824,7 +2824,7 @@ class DistributedKMeansRunner:
                 ("    - final assignment",    km_assign_g),
                 ("redistribute shards",       t_redistribute),
                 ("hash + Merkle (vctx)",      t_vctx_g),
-                ("shard save + block build",  t_shard_io_g),
+                ("shard save + shard build",  t_shard_io_g),
                 ("CONSENSUS (verify+vote+commit)", t_shard_wall_g),
                 ("DVD + json write",   t_state),
             ]
@@ -2868,9 +2868,9 @@ class DistributedKMeansRunner:
                     f"total={r.get('total_shard_time_sec',0.0)*1000:.4f}ms"
                 )
 
-            print("\nPer-block on-state metadata bytes:")
+            print("\nPer-shard on-state metadata bytes:")
             for i, blk in enumerate(bc.state[1:], start=1):
-                print(f"  Block {i}: {block_metadata_bytes(blk)} bytes")
+                print(f"  shard {i}: {shard_metadata_bytes(blk)} bytes")
 
             if sharding_quality is not None:
                 print("\nSemantic sharding quality:")
@@ -2941,7 +2941,7 @@ class DistributedKMeansRunner:
                     rows_per_commit      = self.recovery_rows_per_commit,
                     uplink_mbps          = self.recovery_uplink_mbps,
                     rtt_sec              = self.recovery_rtt_sec,
-                    batch_blocks         = self.recovery_batch_blocks,
+                    batch_shards         = self.recovery_batch_shards,
                     verify_merkle        = self.recovery_verify_merkle,
                     commit_mode          = self.recovery_commit_mode,
                     seed                 = self.seed,
@@ -3016,7 +3016,7 @@ if __name__ == "__main__":
         recovery_rows_per_commit = None,
         recovery_uplink_mbps     = 100.0,
         recovery_rtt_sec         = 0.002,
-        recovery_batch_blocks    = 128,
+        recovery_batch_shards    = 128,
         recovery_verify_merkle   = False,
         recovery_commit_mode     = "epoch",
     )
