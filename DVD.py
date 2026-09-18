@@ -655,8 +655,8 @@ def build_all_verification_ctxs(comm, rank: int, size: int,
 
 # Distributed Ledger
 
-class Blockchain:
-    def __init__(self, chain_file="blockchain.json"):
+class DVD:
+    def __init__(self, chain_file="DVD.json"):
         self.chain_file = chain_file
         self.chain = []
         if os.path.exists(self.chain_file):
@@ -1617,7 +1617,7 @@ class TamperDetectionExperiment:
         self.n_trials = int(n_trials)
         self.seed = int(seed)
         self.shards_dir = os.path.join(output_dir, "shards")
-        self.chain_path = os.path.join(output_dir, "blockchain.json")
+        self.chain_path = os.path.join(output_dir, "DVD.json")
 
 
     def _apply_shard_attack(self, attack, blk, sv, rng):
@@ -1669,7 +1669,7 @@ class TamperDetectionExperiment:
 
 
     def _time_chain_attack(self, attack):
-        bc = Blockchain(chain_file=self.chain_path)
+        bc = DVD(chain_file=self.chain_path)
         bc_attacked = deepcopy(bc)
 
         if attack == "A5_reorder":
@@ -1693,13 +1693,13 @@ class TamperDetectionExperiment:
 
     def run(self):
         if not os.path.exists(self.chain_path):
-            print(f"[TamperExp] No blockchain at {self.chain_path}; skipping")
+            print(f"[TamperExp] No DVD at {self.chain_path}; skipping")
             return None
         if not os.path.isdir(self.shards_dir):
             print(f"[TamperExp] No shards dir at {self.shards_dir}; skipping")
             return None
 
-        bc = Blockchain(chain_file=self.chain_path)
+        bc = DVD(chain_file=self.chain_path)
         committed = [b for b in bc.chain if b.get("block_type") != "genesis"
                                           and "shard_id" in b]
         if not committed:
@@ -1829,7 +1829,7 @@ class RecoveryExperiment:
         self.make_plot      = bool(make_plot)
 
         self.shards_dir  = os.path.join(output_dir, "shards")
-        self.chain_path  = os.path.join(output_dir, "blockchain.json")
+        self.chain_path  = os.path.join(output_dir, "DVD.json")
         self.work_dir    = os.path.join(output_dir, "recovery_work")
 
 
@@ -1849,10 +1849,10 @@ class RecoveryExperiment:
 
     def _open_fork(self):
         os.makedirs(self.work_dir, exist_ok=True)
-        fork_path = os.path.join(self.work_dir, "blockchain_backlog.json")
+        fork_path = os.path.join(self.work_dir, "DVD_backlog.json")
         if os.path.exists(fork_path):
             os.remove(fork_path)
-        bc = Blockchain(chain_file=fork_path)
+        bc = DVD(chain_file=fork_path)
         if os.path.exists(self.chain_path):
             with open(self.chain_path, "r", encoding="utf-8") as f:
                 bc.chain = json.load(f)
@@ -1911,10 +1911,10 @@ class RecoveryExperiment:
                   f"vectors. commit_mode='epoch' avoids the issue entirely.")
         os.makedirs(self.work_dir, exist_ok=True)
 
-        fork_path = os.path.join(self.work_dir, "blockchain_backlog.json")
+        fork_path = os.path.join(self.work_dir, "DVD_backlog.json")
         if os.path.exists(fork_path):
             os.remove(fork_path)
-        bc = Blockchain(chain_file=fork_path)
+        bc = DVD(chain_file=fork_path)
         if os.path.exists(self.chain_path):
             with open(self.chain_path, "r", encoding="utf-8") as f:
                 bc.chain = json.load(f)
@@ -1967,7 +1967,7 @@ class RecoveryExperiment:
             wire_bytes = len(json.dumps(segment, separators=(",", ":")).encode("utf-8"))
             per_block = wire_bytes / k
 
-            recovered = Blockchain.__new__(Blockchain)
+            recovered = DVD.__new__(DVD)
             recovered.chain_file = os.path.join(self.work_dir, "_verify.json")
             recovered.chain = bc.chain[:anchor_len] + segment
 
@@ -2760,7 +2760,7 @@ class DistributedKMeansRunner:
             shard_summary = sorted(shard_summary, key=lambda x: x["shard_id"])
 
             _t = MPI.Wtime()
-            bc = Blockchain(chain_file=os.path.join(self.output_dir, "blockchain.json"))
+            bc = DVD(chain_file=os.path.join(self.output_dir, "DVD.json"))
             for blk in shard_blocks:
                 bc.add_block(blk)
             bc.save()
@@ -2826,7 +2826,7 @@ class DistributedKMeansRunner:
                 ("hash + Merkle (vctx)",      t_vctx_g),
                 ("shard save + block build",  t_shard_io_g),
                 ("CONSENSUS (verify+vote+commit)", t_shard_wall_g),
-                ("blockchain + json write",   t_chain),
+                ("DVD + json write",   t_chain),
             ]
             _acc = t_load + t_scatter + kmeans_time + t_redistribute + \
                    t_vctx_g + t_shard_io_g + t_shard_wall_g + t_chain
